@@ -151,25 +151,60 @@ int sys_lseek(int fd, off_t offset)
 }
 ```
 
-对应的规格说明书如下:
+对应的规格说明书代码如下:
 
 ```
-    def sys_lseek(self):
-        fd = util.FreshBitVec('fd', dt.fd_t)
-        offset = util.FreshBitVec('offset', dt.off_t)
-        return (fd, offset)
+def sys_lseek(old, fd, offset):
+    cond = z3.And(
+        is_fd_valid(fd),
+        is_fn_valid(old.procs[old.current].ofile(fd)),
+        old.files[old.procs[old.current].ofile(fd)].type == dt.file_type.FD_INODE,
+        offset >= 0,
+    )
+
+    new = old.copy()
+
+    fn = old.procs[old.current].ofile(fd)
+    new.files[fn].offset = offset
+    
+    return cond, util.If(cond, new, old)
 ```
 
 - 修改规格说明书,将offset放大100倍:
 
 ```
-    def sys_lseek(self):
-        fd = util.FreshBitVec('fd', dt.fd_t)
-        offset = util.FreshBitVec('offset', dt.off_t) * 100
-        return (fd, offset)
+new.files[fn].offset = offset
 ```
 
-重复测试三次都可以通过验证,原因未知
+结果如下:
+
+```
+root@ubuntu:~/hv6# make hv6-verify -- -v --failfast HV6.test_sys_lseek
+     PY2      hv6-verify
+Using z3 v4.5.0.0
+test_sys_lseek (__main__.HV6) ... If(Not(ULE(16, fd.3)),
+   If(Not(ULE(127,
+              18446744073709551615 +
+              @proc_table.0(0,
+                            @current.0(0),
+                            SignExt(32, fd.3)))),
+      If(Or(Not(0 <= 100*offset.0),
+            Not(@file_table->struct.file::type.0(0,
+                                        @proc_table.0(0,
+                                        @current.0(0),
+                                        SignExt(32, fd.3))) ==
+                2)),
+         4294967274,
+         0),
+      4294967274),
+   4294967287)
+Could not prove, trying to find a minimal ce
+Could not prove, trying to find a minimal ce
+Could not prove, trying to find a minimal ce
+Can not minimize condition further
+Precondition
+...
+```
 
 - 修改c代码,将offset放大100倍
 ```
